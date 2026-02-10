@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useAuth } from "@workspace/firebase/hooks/useAuth"
 import { Button } from "@workspace/ui/components/button"
 import {
   Card,
@@ -14,6 +15,14 @@ import { Badge } from "@workspace/ui/components/badge"
 import { Avatar, AvatarFallback } from "@workspace/ui/components/avatar"
 import { Separator } from "@workspace/ui/components/separator"
 import { Textarea } from "@workspace/ui/components/textarea"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@workspace/ui/components/dropdown-menu"
 
 const teamMembers = [
   { name: "Alice Chen", role: "Lead Engineer", status: "active", initials: "AC" },
@@ -36,6 +45,7 @@ const statusColor: Record<string, "default" | "secondary" | "outline"> = {
 }
 
 function App() {
+  const { user, loading, signOut } = useAuth()
   const [message, setMessage] = useState("")
   const [search, setSearch] = useState("")
 
@@ -45,15 +55,55 @@ function App() {
       m.role.toLowerCase().includes(search.toLowerCase()),
   )
 
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    )
+  }
+
+  if (!user) {
+    window.location.href = "/auth"
+    return null
+  }
+
+  const initials = user.email
+    ? user.email.slice(0, 2).toUpperCase()
+    : "U"
+
   return (
-    <div className="min-h-screen bg-background p-6 md:p-10">
-      <div className="mx-auto max-w-5xl space-y-8">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Team Dashboard</h1>
-          <p className="text-muted-foreground">
-            Manage your team, track activity, and stay connected.
-          </p>
+    <div className="min-h-screen bg-background">
+      <nav className="border-b bg-background">
+        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-6 md:px-10">
+          <span className="text-lg font-semibold">Dashboard</span>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="cursor-pointer outline-none">
+              <Avatar className="h-8 w-8">
+                <AvatarFallback className="text-xs">{initials}</AvatarFallback>
+              </Avatar>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel className="font-normal">
+                <p className="text-sm font-medium">{user.email}</p>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => signOut()} className="cursor-pointer">
+                Log out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
+      </nav>
+
+      <div className="p-6 md:p-10">
+        <div className="mx-auto max-w-5xl space-y-8">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Team Dashboard</h1>
+            <p className="text-muted-foreground">
+              Manage your team, track activity, and stay connected.
+            </p>
+          </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
@@ -157,6 +207,7 @@ function App() {
             </div>
           </CardFooter>
         </Card>
+        </div>
       </div>
     </div>
   )

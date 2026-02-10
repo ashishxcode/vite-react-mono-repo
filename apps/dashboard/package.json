@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@workspace/firebase": "workspace:*",
     "@workspace/ui": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

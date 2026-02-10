@@ -1,38 +1,52 @@
-import { useState } from "react";
-import { Button } from "@workspace/ui/components/button";
+import { useState } from "react"
+import { useAuth } from "@workspace/firebase/hooks/useAuth"
+import { Button } from "@workspace/ui/components/button"
 import {
   Card,
   CardContent,
-  CardDescription,
   CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@workspace/ui/components/card";
-import { Input } from "@workspace/ui/components/input";
-import { Label } from "@workspace/ui/components/label";
-import { Separator } from "@workspace/ui/components/separator";
+} from "@workspace/ui/components/card"
+import { Input } from "@workspace/ui/components/input"
+import { Label } from "@workspace/ui/components/label"
+
+function mapFirebaseError(code) {
+  const errors = {
+    "auth/email-already-in-use": "An account with this email already exists.",
+    "auth/invalid-email": "Please enter a valid email address.",
+    "auth/weak-password": "Password must be at least 6 characters.",
+    "auth/user-not-found": "No account found with this email.",
+    "auth/wrong-password": "Incorrect password.",
+    "auth/invalid-credential": "Invalid email or password.",
+    "auth/too-many-requests": "Too many attempts. Please try again later.",
+  }
+  return errors[code] || "An unexpected error occurred. Please try again."
+}
 
 function LoginForm({ onSwitch }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const { signIn } = useAuth()
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    setError("");
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError("")
 
     if (!email || !password) {
-      setError("Please fill in all fields.");
-      return;
+      setError("Please fill in all fields.")
+      return
     }
 
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      window.location.href = "/";
-    }, 1500);
-  };
+    try {
+      setLoading(true)
+      await signIn(email, password)
+      window.location.href = "/"
+    } catch (err) {
+      setError(mapFirebaseError(err.code))
+      setLoading(false)
+    }
+  }
 
   return (
     <>
@@ -57,15 +71,7 @@ function LoginForm({ onSwitch }) {
               />
             </div>
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="login-password">Password</Label>
-                <button
-                  type="button"
-                  className="text-xs text-muted-foreground hover:text-foreground"
-                >
-                  Forgot password?
-                </button>
-              </div>
+              <Label htmlFor="login-password">Password</Label>
               <Input
                 id="login-password"
                 type="password"
@@ -76,13 +82,9 @@ function LoginForm({ onSwitch }) {
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
           </CardContent>
-          <CardFooter className="flex flex-col gap-3">
+          <CardFooter>
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Signing in..." : "Sign in"}
-            </Button>
-            <Separator />
-            <Button type="button" variant="outline" className="w-full">
-              Continue with Google
             </Button>
           </CardFooter>
         </form>
@@ -98,42 +100,46 @@ function LoginForm({ onSwitch }) {
         </button>
       </p>
     </>
-  );
+  )
 }
 
 function SignupForm({ onSwitch }) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const { signUp } = useAuth()
+  const [name, setName] = useState("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    setError("");
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError("")
 
     if (!name || !email || !password || !confirmPassword) {
-      setError("Please fill in all fields.");
-      return;
+      setError("Please fill in all fields.")
+      return
     }
 
     if (password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
+      setError("Password must be at least 8 characters.")
+      return
     }
 
     if (password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
+      setError("Passwords do not match.")
+      return
     }
 
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      window.location.href = "/";
-    }, 1500);
-  };
+    try {
+      setLoading(true)
+      await signUp(email, password)
+      window.location.href = "/"
+    } catch (err) {
+      setError(mapFirebaseError(err.code))
+      setLoading(false)
+    }
+  }
 
   return (
     <>
@@ -189,13 +195,9 @@ function SignupForm({ onSwitch }) {
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
           </CardContent>
-          <CardFooter className="flex flex-col gap-3">
+          <CardFooter>
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "Creating account..." : "Create account"}
-            </Button>
-            <Separator />
-            <Button type="button" variant="outline" className="w-full">
-              Sign up with Google
             </Button>
           </CardFooter>
         </form>
@@ -211,23 +213,52 @@ function SignupForm({ onSwitch }) {
         </button>
       </p>
     </>
-  );
+  )
 }
 
 function App() {
-  const [view, setView] = useState("login");
+  const { user, loading } = useAuth()
+  const [view, setView] = useState("login")
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <p className="text-muted-foreground">Loading...</p>
+      </div>
+    )
+  }
+
+  if (user) {
+    window.location.href = "/"
+    return null
+  }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-sm space-y-6">
-        {view === "login" ? (
-          <LoginForm onSwitch={() => setView("signup")} />
-        ) : (
-          <SignupForm onSwitch={() => setView("login")} />
-        )}
+    <div className="min-h-screen bg-background">
+      <nav className="border-b bg-background">
+        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-6">
+          <span className="text-lg font-semibold">Workspace</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setView("login")}
+          >
+            Login
+          </Button>
+        </div>
+      </nav>
+
+      <div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center p-4">
+        <div className="w-full max-w-sm space-y-6">
+          {view === "login" ? (
+            <LoginForm onSwitch={() => setView("signup")} />
+          ) : (
+            <SignupForm onSwitch={() => setView("login")} />
+          )}
+        </div>
       </div>
     </div>
-  );
+  )
 }
 
-export default App;
+export default App
