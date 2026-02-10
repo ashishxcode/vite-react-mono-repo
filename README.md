@@ -7,10 +7,29 @@ A pnpm + Turborepo monorepo with two Vite React apps sharing a common UI package
 ```
 mono-repos/
 ├── apps/
-│   ├── dashboard/          # Main app — Vite + React (TypeScript)
-│   └── auth/               # Login/Signup — Vite + React (JavaScript)
+│   ├── dashboard/                # Main app — Vite + React (TypeScript)
+│   │   └── src/
+│   │       ├── App.tsx           # Auth guard + layout shell
+│   │       ├── components/
+│   │       │   ├── navbar.tsx    # Avatar dropdown with sign out
+│   │       │   ├── stats-cards.tsx
+│   │       │   ├── team-members.tsx
+│   │       │   ├── recent-activity.tsx
+│   │       │   └── quick-message.tsx
+│   │       └── data/
+│   │           └── dashboard-data.ts
+│   └── auth/                     # Login/Signup — Vite + React (JavaScript)
+│       └── src/
+│           ├── App.jsx           # Auth guard + view toggle
+│           ├── components/
+│           │   ├── navbar.jsx    # Branding + login button
+│           │   ├── login-form.jsx
+│           │   └── signup-form.jsx
+│           └── lib/
+│               └── firebase-errors.js
 ├── packages/
 │   ├── ui/                 # Shared shadcn/ui components
+│   ├── firebase/           # Shared Firebase auth (config, context, hooks)
 │   └── typescript-config/  # Shared tsconfig presets
 ├── turbo.json              # Turborepo task config
 ├── pnpm-workspace.yaml     # Workspace member declarations
@@ -93,6 +112,19 @@ Each app's `src/index.css` follows this pattern:
 - `@import "@workspace/ui/styles/globals.css"` pulls in the shared theme (oklch colors, CSS variables, dark mode)
 - `@source` tells Tailwind v4 to scan the UI package for class names — without it, component styles won't be generated
 
+### Firebase Authentication (`packages/firebase`)
+
+Both apps share a single Firebase auth instance via the `@workspace/firebase` package. Since both apps run on the same origin, Firebase's IndexedDB persistence means a user who signs in on `/auth` is automatically authenticated on `/` — no token passing required.
+
+```
+packages/firebase/src/
+├── config/firebase.ts     # Firebase app init + auth instance
+├── context/AuthContext.tsx # AuthProvider with signIn/signUp/signOut
+└── hooks/useAuth.ts       # useAuth() hook for consuming auth state
+```
+
+Both apps wrap their root component in `<AuthProvider>` (in `main.tsx` / `main.jsx`).
+
 ### Dev Proxy
 
 During development, each app runs on its own port. The dashboard's `vite.config.ts` includes a proxy so `/auth` requests are forwarded to the auth dev server:
@@ -147,6 +179,7 @@ Then visit `http://localhost:3000` (dashboard) and `http://localhost:3000/auth` 
 | [React 19](https://react.dev) | UI framework |
 | [Tailwind CSS v4](https://tailwindcss.com) | Utility-first CSS with CSS-first configuration |
 | [shadcn/ui](https://ui.shadcn.com) | Copy-paste component primitives (Radix UI + Tailwind) |
+| [Firebase Auth](https://firebase.google.com/docs/auth) | Email/password authentication shared across apps |
 
 ## Deep Dive
 

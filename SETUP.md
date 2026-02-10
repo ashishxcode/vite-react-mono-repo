@@ -11,16 +11,17 @@ A pnpm + Turborepo monorepo with two Vite React apps (TypeScript & JavaScript) s
 3. [Root Configuration](#1-root-configuration)
 4. [Shared TypeScript Config](#2-shared-typescript-config)
 5. [Shared UI Package](#3-shared-ui-package)
-6. [Dashboard App (TypeScript)](#4-dashboard-app)
-7. [Auth App (JavaScript)](#5-auth-app)
-8. [Install & Add Components](#6-install--add-components)
-9. [How Everything Connects](#how-everything-connects)
-10. [Gotchas & Lessons Learned](#gotchas--lessons-learned)
-11. [Mental Models](#mental-models-for-monorepo-thinking)
-12. [Vercel Deployment](#vercel-deployment)
-13. [Dev Proxy](#dev-proxy-accessing-both-apps-on-one-port)
-14. [Testing Production Build Locally](#testing-production-build-locally)
-15. [Common Commands](#common-commands)
+6. [Shared Firebase Package](#3b-shared-firebase-package-packagesfirebase)
+7. [Dashboard App (TypeScript)](#4-dashboard-app)
+8. [Auth App (JavaScript)](#5-auth-app)
+9. [Install & Add Components](#6-install--add-components)
+10. [How Everything Connects](#how-everything-connects)
+11. [Gotchas & Lessons Learned](#gotchas--lessons-learned)
+12. [Mental Models](#mental-models-for-monorepo-thinking)
+13. [Vercel Deployment](#vercel-deployment)
+14. [Dev Proxy](#dev-proxy-accessing-both-apps-on-one-port)
+15. [Testing Production Build Locally](#testing-production-build-locally)
+16. [Common Commands](#common-commands)
 
 ---
 
@@ -115,12 +116,21 @@ The `^` prefix means "run this task in my dependencies first." So if dashboard d
 ```
 mono-repos/
 ├── apps/
-│   ├── dashboard/     # Dashboard — Vite React (TypeScript)
-│   └── auth/          # Auth — Vite React (JavaScript)
+│   ├── dashboard/              # Dashboard — Vite React (TypeScript)
+│   │   └── src/
+│   │       ├── App.tsx         # Auth guard + layout composition
+│   │       ├── components/     # Navbar, StatsCards, TeamMembers, etc.
+│   │       └── data/           # Static data + types
+│   └── auth/                   # Auth — Vite React (JavaScript)
+│       └── src/
+│           ├── App.jsx         # Auth guard + view toggle
+│           ├── components/     # Navbar, LoginForm, SignupForm
+│           └── lib/            # Firebase error mapping
 ├── packages/
-│   ├── ui/              # Shared shadcn/ui components
-│   └── typescript-config/  # Shared tsconfig presets
-├── package.json         # Root workspace config
+│   ├── ui/                     # Shared shadcn/ui components
+│   ├── firebase/               # Shared Firebase auth (config, context, hooks)
+│   └── typescript-config/      # Shared tsconfig presets
+├── package.json                # Root workspace config
 ├── pnpm-workspace.yaml
 ├── turbo.json
 ├── .npmrc
@@ -625,6 +635,69 @@ oklch is perceptually uniform — changing the hue doesn't change perceived brig
 
 ---
 
+### 3b. Shared Firebase Package (`packages/firebase`)
+
+This package provides Firebase authentication shared across both apps.
+
+#### `package.json`
+
+```json
+{
+  "name": "@workspace/firebase",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./config/*": "./src/config/*.ts",
+    "./context/*": "./src/context/*.tsx",
+    "./hooks/*": "./src/hooks/*.ts"
+  },
+  "dependencies": {
+    "firebase": "^11.0.0"
+  },
+  "peerDependencies": {
+    "react": "^18 || ^19",
+    "react-dom": "^18 || ^19"
+  }
+}
+```
+
+Same pattern as the UI package — source-level exports, no build step. The `exports` field maps three subpaths:
+
+- `@workspace/firebase/config/firebase` → Firebase app initialization and `auth` instance
+- `@workspace/firebase/context/AuthContext` → `AuthProvider` component with `onAuthStateChanged` listener
+- `@workspace/firebase/hooks/useAuth` → `useAuth()` hook exposing `user`, `loading`, `signIn`, `signUp`, `signOut`
+
+#### How shared auth works across two SPAs
+
+Firebase Auth stores the session in the browser's IndexedDB (default persistence). Since both apps are served from the same origin (`localhost:5173` in dev, same domain in production), they share the same IndexedDB database. This means:
+
+1. User signs in on `/auth` → Firebase writes session to IndexedDB
+2. User navigates to `/` (dashboard) → Firebase reads the same IndexedDB → user is authenticated
+3. No cookies, no tokens passed via URL — it's automatic because same origin = same storage
+
+Both apps wrap their root `<App />` in `<AuthProvider>`:
+
+```tsx
+// apps/dashboard/src/main.tsx
+import { AuthProvider } from "@workspace/firebase/context/AuthContext"
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  </StrictMode>,
+)
+```
+
+#### Auth flow
+
+- **Dashboard**: If `loading`, show spinner. If no `user`, redirect to `/auth`. Otherwise render the dashboard with navbar showing avatar + dropdown with logout.
+- **Auth**: If `loading`, show spinner. If `user` exists, redirect to `/`. Otherwise show login/signup forms.
+
+---
+
 ### 4. Dashboard App (`apps/dashboard`)
 
 #### `package.json`
@@ -672,12 +745,43 @@ The `&&` operator means "only run the second command if the first succeeds." If 
 #### `vite.config.ts`
 
 ```ts
-import { defineConfig } from "vite"
+import path from "node:path"
+import { defineConfig, type PluginOption } from "vite"
+import type { IncomingMessage, ServerResponse } from "node:http"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 
+function authRedirect(): PluginOption {
+  return {
+    name: "auth-redirect",
+    configureServer(server) {
+      server.middlewares.use(
+        (req: IncomingMessage, _res: ServerResponse, next: () => void) => {
+          if (req.url === "/auth") {
+            req.url = "/auth/"
+          }
+          next()
+        },
+      )
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), authRedirect()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
+  },
+  server: {
+    proxy: {
+      "/auth": {
+        target: "http://localhost:5174",
+        changeOrigin: true,
+      },
+    },
+  },
 })
 ```
 
@@ -693,12 +797,11 @@ export default defineConfig({
 3. Generates only the CSS utilities your code actually uses
 4. In dev: updates via HMR when you add/remove classes
 
-**Why no `resolve.alias` for `@workspace/ui`?** Vite resolves workspace packages through pnpm's symlinks and the package's `exports` field. No alias needed. If `exports` didn't exist, you'd need:
-```ts
-resolve: {
-  alias: { "@workspace/ui": path.resolve("../../packages/ui/src") }
-}
-```
+**`resolve.alias`** — Maps `@` to `src/` so components can use clean imports like `import { Navbar } from "@/components/navbar"`. Note: `tsconfig.app.json` also has a matching `paths` entry (`"@/*": ["./src/*"]`) for TypeScript/IDE support. Both are needed — tsconfig `paths` handles type-checking, Vite `resolve.alias` handles runtime resolution.
+
+**`authRedirect()` plugin** — See the [Dev Proxy](#dev-proxy-accessing-both-apps-on-one-port) section for details.
+
+**Why no `resolve.alias` for `@workspace/ui`?** Vite resolves workspace packages through pnpm's symlinks and the package's `exports` field. No alias needed.
 
 #### `tsconfig.json` — Project References
 
@@ -731,7 +834,8 @@ These need different `lib` and `types` settings. `vite.config.ts` runs in Node.j
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@workspace/ui/*": ["../../packages/ui/src/*"]
+      "@workspace/ui/*": ["../../packages/ui/src/*"],
+      "@workspace/firebase/*": ["../../packages/firebase/src/*"]
     }
   },
   "include": ["src"]
@@ -742,8 +846,9 @@ These need different `lib` and `types` settings. `vite.config.ts` runs in Node.j
 
 **`paths`** — Tells TypeScript where to find types for import paths. This is for TYPE CHECKING ONLY — it does NOT affect runtime resolution (Vite handles that via the `exports` field).
 
-- `"@/*": ["./src/*"]` — `import { Foo } from "@/components/Foo"` → looks in `./src/components/Foo`
+- `"@/*": ["./src/*"]` — `import { Navbar } from "@/components/navbar"` → looks in `./src/components/navbar`
 - `"@workspace/ui/*": ["../../packages/ui/src/*"]` — `import { Button } from "@workspace/ui/components/button"` → TypeScript finds types at `../../packages/ui/src/components/button.tsx`
+- `"@workspace/firebase/*": ["../../packages/firebase/src/*"]` — `import { useAuth } from "@workspace/firebase/hooks/useAuth"` → TypeScript finds types at `../../packages/firebase/src/hooks/useAuth.ts`
 
 **Why is this needed if `exports` already maps the paths?** TypeScript's `moduleResolution: "bundler"` does understand `exports`, but `paths` gives it direct access to the source `.tsx` files. This provides:
 - Accurate type inference from the actual source (not just `.d.ts` files)
@@ -751,6 +856,25 @@ These need different `lib` and `types` settings. `vite.config.ts` runs in Node.j
 - Faster type-checking (no need to generate/find declaration files)
 
 **`include: ["src"]`** — Only type-check files inside `src/`. Without this, TypeScript would check every `.ts`/`.tsx` file in the project, including `node_modules` (slow and error-prone).
+
+#### Refactored Component Structure
+
+The dashboard app is split into small, focused components:
+
+```
+src/
+├── App.tsx                    # ~30 lines — auth guard + composition
+├── components/
+│   ├── navbar.tsx             # Avatar + DropdownMenu with logout
+│   ├── stats-cards.tsx        # 4 metric cards (static)
+│   ├── team-members.tsx       # Search input + filtered member list (own state)
+│   ├── recent-activity.tsx    # Activity feed card
+│   └── quick-message.tsx      # Textarea + send button (own state)
+└── data/
+    └── dashboard-data.ts      # TeamMember/Activity types + static arrays
+```
+
+Each component is self-contained — `team-members.tsx` owns its `search` state, `quick-message.tsx` owns its `message` state. `App.tsx` only handles auth and layout composition.
 
 #### `src/index.css` — Tailwind Entry Point
 
@@ -817,7 +941,8 @@ This is why the auth doesn't need TypeScript installed. The TypeScript-to-JavaSc
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@workspace/ui/*": ["../../packages/ui/src/*"]
+      "@workspace/ui/*": ["../../packages/ui/src/*"],
+      "@workspace/firebase/*": ["../../packages/firebase/src/*"]
     }
   },
   "include": ["src"]
@@ -827,6 +952,42 @@ This is why the auth doesn't need TypeScript installed. The TypeScript-to-JavaSc
 **What**: A `jsconfig.json` is literally a `tsconfig.json` with `allowJs: true` and `checkJs: false` implied. It exists purely for IDE support.
 
 **Why it matters**: Without this file, VS Code won't understand `@workspace/ui/components/button` imports. You'd get red squiggles everywhere and no autocomplete. The `paths` mapping gives VS Code the same resolution as Vite uses at runtime.
+
+#### `vite.config.js`
+
+```js
+import path from "node:path"
+import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react"
+import tailwindcss from "@tailwindcss/vite"
+
+export default defineConfig({
+  base: "/auth/",
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
+  },
+})
+```
+
+Same `resolve.alias` pattern as dashboard — maps `@` to `src/` for clean imports. The `base: "/auth/"` is explained in the [Vercel Deployment](#vercel-deployment) section.
+
+#### Refactored Component Structure
+
+```
+src/
+├── App.jsx                  # ~30 lines — auth guard + view toggle
+├── components/
+│   ├── navbar.jsx           # "Workspace" branding + Login button
+│   ├── login-form.jsx       # Email/password form with Firebase signIn
+│   └── signup-form.jsx      # Registration form with validation + Firebase signUp
+└── lib/
+    └── firebase-errors.js   # Maps Firebase error codes to user-friendly messages
+```
+
+`App.jsx` toggles between `LoginForm` and `SignupForm` via a `view` state. Each form component is self-contained with its own form state, validation, and error handling.
 
 ---
 
@@ -871,13 +1032,13 @@ Here's the full chain when a user visits dashboard in the browser:
 Browser requests http://localhost:5173/
   → Vite serves index.html
   → Browser loads /src/main.tsx (as ESM)
-  → main.tsx imports App.tsx
-  → App.tsx imports Button from "@workspace/ui/components/button"
-  → Vite resolves "@workspace/ui" via pnpm symlink
-  → Reads packages/ui/package.json exports field
-  → Maps "components/button" → "src/components/button.tsx"
-  → esbuild transpiles button.tsx (strips types, transforms JSX)
-  → Browser receives plain JavaScript
+  → main.tsx wraps App in AuthProvider from "@workspace/firebase/context/AuthContext"
+  → AuthProvider initializes Firebase and listens for auth state via onAuthStateChanged
+  → App.tsx checks user/loading from useAuth()
+  → If not authenticated → window.location.href = "/auth" (redirects to auth app)
+  → If authenticated → renders Navbar + dashboard components
+  → Components import from "@workspace/ui/components/*"
+  → Vite resolves "@workspace/ui" via pnpm symlink → esbuild transpiles .tsx
 
 For CSS:
   → main.tsx imports "./index.css"
@@ -888,6 +1049,14 @@ For CSS:
   → Scans @source path for class names
   → Generates CSS only for classes actually used
   → Browser receives complete styled CSS
+
+Auth flow:
+  → Unauthenticated user lands on /auth
+  → Auth app renders LoginForm or SignupForm
+  → User submits credentials → Firebase signIn/signUp
+  → Firebase stores session in IndexedDB
+  → window.location.href = "/" → redirects to dashboard
+  → Dashboard's AuthProvider reads same IndexedDB → user is authenticated
 ```
 
 ---
