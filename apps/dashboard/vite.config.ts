@@ -1,3 +1,4 @@
+import path from "node:path"
 import { defineConfig, type PluginOption } from "vite"
 import type { IncomingMessage, ServerResponse } from "node:http"
 import react from "@vitejs/plugin-react"
@@ -21,6 +22,11 @@ function authRedirect(): PluginOption {
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), authRedirect()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
+  },
   server: {
     proxy: {
       "/auth": {
