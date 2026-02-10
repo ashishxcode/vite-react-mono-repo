@@ -1,5 +1,5 @@
 {
-  "name": "mono-repos",
+  "name": "vite-react-mono-repo",
   "private": true,
   "scripts": {
     "dev": "turbo dev",

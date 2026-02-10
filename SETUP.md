@@ -114,7 +114,7 @@ The `^` prefix means "run this task in my dependencies first." So if dashboard d
 ## Architecture Overview
 
 ```
-mono-repos/
+vite-react-mono-repo/
 ├── apps/
 │   ├── dashboard/              # Dashboard — Vite React (TypeScript)
 │   │   └── src/
@@ -155,7 +155,7 @@ The distinction matters because apps have `dev`/`build` scripts while packages m
 
 ```json
 {
-  "name": "mono-repos",
+  "name": "vite-react-mono-repo",
   "private": true,
   "scripts": {
     "dev": "turbo dev",

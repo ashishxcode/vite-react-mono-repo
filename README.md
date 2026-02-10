@@ -1,11 +1,11 @@
-# mono-repos
+# vite-react-mono-repo
 
 A pnpm + Turborepo monorepo with two Vite React apps sharing a common UI package built on shadcn/ui + Tailwind CSS v4.
 
 ## Project Structure
 
 ```
-mono-repos/
+vite-react-mono-repo/
 ├── apps/
 │   ├── dashboard/                # Main app — Vite + React (TypeScript)
 │   │   └── src/
