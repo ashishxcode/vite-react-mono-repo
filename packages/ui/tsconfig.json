@@ -1,0 +1,10 @@
+{
+  "extends": "@workspace/typescript-config/ui.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@workspace/ui/*": ["./src/*"]
+    }
+  },
+  "include": ["src"]
+}
