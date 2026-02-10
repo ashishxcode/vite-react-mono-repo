@@ -11,12 +11,16 @@ A pnpm + Turborepo monorepo with two Vite React apps (TypeScript & JavaScript) s
 3. [Root Configuration](#1-root-configuration)
 4. [Shared TypeScript Config](#2-shared-typescript-config)
 5. [Shared UI Package](#3-shared-ui-package)
-6. [TypeScript App](#4-typescript-app)
-7. [JavaScript App](#5-javascript-app)
+6. [Dashboard App (TypeScript)](#4-dashboard-app)
+7. [Auth App (JavaScript)](#5-auth-app)
 8. [Install & Add Components](#6-install--add-components)
 9. [How Everything Connects](#how-everything-connects)
 10. [Gotchas & Lessons Learned](#gotchas--lessons-learned)
 11. [Mental Models](#mental-models-for-monorepo-thinking)
+12. [Vercel Deployment](#vercel-deployment)
+13. [Dev Proxy](#dev-proxy-accessing-both-apps-on-one-port)
+14. [Testing Production Build Locally](#testing-production-build-locally)
+15. [Common Commands](#common-commands)
 
 ---
 
@@ -48,7 +52,7 @@ With a monorepo, you edit the Button, save, and both apps hot-reload instantly. 
 
 **How it works under the hood**:
 ```
-apps/ts-app/node_modules/@workspace/ui
+apps/dashboard/node_modules/@workspace/ui
   → symlink → ../../packages/ui
 ```
 So `import { Button } from "@workspace/ui/components/button"` actually reads `packages/ui/src/components/button.tsx` (via the `exports` field).
@@ -58,15 +62,15 @@ So `import { Button } from "@workspace/ui/components/button"` actually reads `pa
 **What**: A build orchestrator that understands the dependency graph between your workspaces.
 
 **Why**:
-- **Dependency-aware**: When you run `pnpm build`, Turborepo knows ts-app depends on ui, so it builds ui first. You don't manage ordering manually.
+- **Dependency-aware**: When you run `pnpm build`, Turborepo knows dashboard depends on ui, so it builds ui first. You don't manage ordering manually.
 - **Caching**: If you run `pnpm build` twice and nothing changed, the second run is instant — Turborepo replays cached output.
-- **Parallel execution**: Independent tasks (ts-app build and js-app build) run in parallel automatically.
+- **Parallel execution**: Independent tasks (dashboard build and auth build) run in parallel automatically.
 
 **How** `"^build"` works:
 ```
 "build": { "dependsOn": ["^build"] }
 ```
-The `^` prefix means "run this task in my dependencies first." So if ts-app depends on ui, Turborepo runs `ui:build` → then `ts-app:build`. Without `^`, it would only mean "run my own build task first" (useless).
+The `^` prefix means "run this task in my dependencies first." So if dashboard depends on ui, Turborepo runs `ui:build` → then `dashboard:build`. Without `^`, it would only mean "run my own build task first" (useless).
 
 ### Vite (not Webpack, not Parcel)
 
@@ -77,7 +81,7 @@ The `^` prefix means "run this task in my dependencies first." So if ts-app depe
 - **esbuild transpilation**: TypeScript/JSX is transpiled by esbuild (written in Go), which is 10-100x faster than Babel/tsc.
 - **HMR**: When you edit a file, only that module is replaced in the browser — no full page reload.
 
-**Key insight for this monorepo**: Vite treats workspace-linked packages as source code, not pre-built node_modules. When js-app imports `@workspace/ui/components/button`, Vite sees it's a symlink to a `.tsx` file and transpiles it through esbuild. This is why we don't need a build step for the UI package.
+**Key insight for this monorepo**: Vite treats workspace-linked packages as source code, not pre-built node_modules. When auth imports `@workspace/ui/components/button`, Vite sees it's a symlink to a `.tsx` file and transpiles it through esbuild. This is why we don't need a build step for the UI package.
 
 ### shadcn/ui (not a component library)
 
@@ -111,8 +115,8 @@ The `^` prefix means "run this task in my dependencies first." So if ts-app depe
 ```
 mono-repos/
 ├── apps/
-│   ├── ts-app/          # Vite React (TypeScript)
-│   └── js-app/          # Vite React (JavaScript)
+│   ├── dashboard/     # Dashboard — Vite React (TypeScript)
+│   └── auth/          # Auth — Vite React (JavaScript)
 ├── packages/
 │   ├── ui/              # Shared shadcn/ui components
 │   └── typescript-config/  # Shared tsconfig presets
@@ -198,7 +202,7 @@ packages:
 
 With `^`:
 - `["^build"]` means "run `build` in every package I depend on first"
-- Example: ts-app depends on @workspace/ui → Turborepo runs ui's build before ts-app's build
+- Example: dashboard depends on @workspace/ui → Turborepo runs ui's build before dashboard's build
 
 **`"outputs": ["dist/**"]`** — Tells Turborepo which files are produced by the build. Used for caching: if inputs haven't changed, Turborepo restores `dist/` from cache instead of rebuilding.
 
@@ -227,10 +231,10 @@ public-hoist-pattern[]=@types/*
 
 **Why this is needed**: TypeScript resolves type declarations by walking up the `node_modules` tree from the file's physical location. In our setup:
 
-1. ts-app's `tsconfig.app.json` has `paths` pointing to `../../packages/ui/src/*`
+1. dashboard's `tsconfig.app.json` has `paths` pointing to `../../packages/ui/src/*`
 2. When tsc processes `packages/ui/src/components/button.tsx`, it sees `import * as React from "react"`
 3. tsc looks for `@types/react` starting from `packages/ui/src/components/` and walking up
-4. Without hoisting, `@types/react` only exists in `apps/ts-app/node_modules/` and `packages/ui/node_modules/` (pnpm's `.pnpm` store) — tsc can't find it via the node_modules walk
+4. Without hoisting, `@types/react` only exists in `apps/dashboard/node_modules/` and `packages/ui/node_modules/` (pnpm's `.pnpm` store) — tsc can't find it via the node_modules walk
 5. With hoisting, `@types/react` exists at `<root>/node_modules/@types/react` — tsc finds it
 
 **The `[]=` syntax**: This is pnpm's way of appending to an array config. Each `[]=` adds an entry. You can have multiple:
@@ -621,13 +625,13 @@ oklch is perceptually uniform — changing the hue doesn't change perceived brig
 
 ---
 
-### 4. TypeScript App (`apps/ts-app`)
+### 4. Dashboard App (`apps/dashboard`)
 
 #### `package.json`
 
 ```json
 {
-  "name": "@workspace/ts-app",
+  "name": "@workspace/dashboard",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build"
@@ -771,16 +775,16 @@ These need different `lib` and `types` settings. `vite.config.ts` runs in Node.j
 
 **What happens without it**: Buttons render as unstyled `<button>` elements. The HTML has `class="bg-primary px-4 ..."` but no CSS is generated for those classes, so the browser ignores them.
 
-**The relative path**: `../../../packages/ui/src` goes from `apps/ts-app/src/` → up to `apps/ts-app/` → up to `apps/` → up to root → down to `packages/ui/src/`. This path is relative to the CSS file's location.
+**The relative path**: `../../../packages/ui/src` goes from `apps/dashboard/src/` → up to `apps/dashboard/` → up to `apps/` → up to root → down to `packages/ui/src/`. This path is relative to the CSS file's location.
 
 ---
 
-### 5. JavaScript App (`apps/js-app`)
+### 5. Auth App (`apps/auth`)
 
-Almost identical to ts-app, with these differences:
+Almost identical to dashboard, with these differences:
 
-| Aspect | ts-app | js-app |
-|--------|--------|--------|
+| Aspect | Dashboard | Auth |
+|--------|-----------|------|
 | Config | `tsconfig.json` | `jsconfig.json` |
 | Vite config | `vite.config.ts` | `vite.config.js` |
 | Build script | `tsc -b && vite build` | `vite build` |
@@ -791,7 +795,7 @@ Almost identical to ts-app, with these differences:
 
 This is the key insight of the source-level export strategy:
 
-1. js-app imports `@workspace/ui/components/button`
+1. auth imports `@workspace/ui/components/button`
 2. pnpm resolves this to `packages/ui/src/components/button.tsx` (via `exports`)
 3. Vite sees a `.tsx` file in its module graph
 4. esbuild strips the TypeScript types and transforms JSX → JavaScript
@@ -799,7 +803,7 @@ This is the key insight of the source-level export strategy:
 
 esbuild does NOT type-check — it literally deletes the types. `interface ButtonProps { ... }` → removed entirely. `as HTMLButtonElement` → removed. The output is valid JavaScript.
 
-This is why the js-app doesn't need TypeScript installed. The TypeScript-to-JavaScript conversion happens inside Vite's pipeline, not as a separate step.
+This is why the auth doesn't need TypeScript installed. The TypeScript-to-JavaScript conversion happens inside Vite's pipeline, not as a separate step.
 
 #### `jsconfig.json`
 
@@ -845,7 +849,7 @@ pnpm ui:add input
 2. Resolves all dependencies across all workspaces
 3. Downloads packages to the global content-addressable store
 4. Creates `node_modules` in each workspace with symlinks
-5. Creates workspace symlinks (e.g., `apps/ts-app/node_modules/@workspace/ui` → `packages/ui`)
+5. Creates workspace symlinks (e.g., `apps/dashboard/node_modules/@workspace/ui` → `packages/ui`)
 6. Generates `pnpm-lock.yaml` (the lockfile)
 
 **What `pnpm ui:add button` does**:
@@ -861,7 +865,7 @@ The component is immediately importable from both apps — no restart needed. Vi
 
 ## How Everything Connects
 
-Here's the full chain when a user visits ts-app in the browser:
+Here's the full chain when a user visits dashboard in the browser:
 
 ```
 Browser requests http://localhost:5173/
@@ -892,7 +896,7 @@ For CSS:
 
 ### 1. pnpm Strict Isolation + TypeScript Types
 
-**Problem**: `tsc` in ts-app type-checks files from `packages/ui` (via path aliases). When processing `button.tsx`, tsc sees `import * as React from "react"` and tries to find `@types/react` by walking up from `packages/ui/src/components/`. With pnpm's strict isolation, `@types/react` is only in each workspace's isolated `node_modules` — not findable via the parent directory walk.
+**Problem**: `tsc` in dashboard type-checks files from `packages/ui` (via path aliases). When processing `button.tsx`, tsc sees `import * as React from "react"` and tries to find `@types/react` by walking up from `packages/ui/src/components/`. With pnpm's strict isolation, `@types/react` is only in each workspace's isolated `node_modules` — not findable via the parent directory walk.
 
 **Fix**: `public-hoist-pattern[]=@types/*` in `.npmrc` hoists type packages to root `node_modules`, making them findable from any directory in the repo.
 
@@ -958,11 +962,173 @@ Source exports work perfectly for internal monorepo packages consumed by Vite ap
 
 ---
 
+## Vercel Deployment
+
+Both apps are deployed as a single Vercel project with path-based routing: dashboard at `/` and auth at `/auth`.
+
+### `vercel.json`
+
+```json
+{
+  "framework": null,
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm build && cp -r apps/auth/dist apps/dashboard/dist/auth",
+  "outputDirectory": "apps/dashboard/dist",
+  "rewrites": [
+    { "source": "/auth", "destination": "/auth/index.html" },
+    { "source": "/auth/((?!assets/).*)", "destination": "/auth/index.html" },
+    { "source": "/((?!assets/|auth/).*)", "destination": "/index.html" }
+  ]
+}
+```
+
+**`"framework": null`** — Tells Vercel not to auto-detect a framework. Since this is a monorepo with a custom build setup, we configure everything manually. Without this, Vercel might detect Vite and apply defaults that conflict with our multi-app setup.
+
+**`"buildCommand"`** — Two steps:
+1. `pnpm build` — Turborepo builds both apps in parallel (respecting dependency order)
+2. `cp -r apps/auth/dist apps/dashboard/dist/auth` — Copies auth's build output INTO dashboard's dist as a subdirectory
+
+After this, the file structure is:
+```
+apps/dashboard/dist/
+├── index.html           ← dashboard
+├── assets/              ← dashboard JS/CSS
+└── auth/
+    ├── index.html       ← auth
+    └── assets/          ← auth JS/CSS
+```
+
+**`"outputDirectory": "apps/dashboard/dist"`** — Vercel serves this single directory. It contains both apps.
+
+**`"rewrites"` — SPA Fallback Rules**:
+
+SPAs use client-side routing — all routes should serve the same `index.html` and let JavaScript handle the URL. But with two SPAs on one domain, we need careful rules:
+
+1. **`/auth` → `/auth/index.html`** — Exact match for `/auth` (no trailing slash). Without this, Vercel would look for a file literally named `auth` (not a directory).
+
+2. **`/auth/((?!assets/).*)`** — Matches any `/auth/*` path EXCEPT `/auth/assets/*`. The `(?!assets/)` is a negative lookahead — it says "match anything after `/auth/` as long as it doesn't start with `assets/`." This ensures:
+   - `/auth/login` → serves `/auth/index.html` (SPA handles routing)
+   - `/auth/assets/index.js` → serves the actual JS file (not rewritten)
+
+3. **`/((?!assets/|auth/).*)`** — Matches any root path EXCEPT `/assets/*` and `/auth/*`. This is the dashboard's SPA fallback:
+   - `/dashboard` → serves `/index.html`
+   - `/settings` → serves `/index.html`
+   - `/assets/main.js` → serves the actual file
+   - `/auth/anything` → NOT matched (handled by rule 2)
+
+**Why `(?!...)` negative lookahead?** Asset files (JS, CSS, images) must be served as-is. If we rewrote `/assets/main.js` to `/index.html`, the browser would get HTML instead of JavaScript and the app would break.
+
+### Auth App `base` Path
+
+```js
+// apps/auth/vite.config.js
+export default defineConfig({
+  base: "/auth/",
+  // ...
+})
+```
+
+**What**: The `base` option prepends `/auth/` to all asset URLs in the production build.
+
+**Why**: Without it, auth's `index.html` would reference `/assets/index.js`. But on the deployed site, auth's assets live at `/auth/assets/index.js`. With `base: "/auth/"`, all generated URLs are prefixed correctly:
+
+```html
+<!-- Without base -->
+<script src="/assets/index.js"></script>
+
+<!-- With base: "/auth/" -->
+<script src="/auth/assets/index.js"></script>
+```
+
+**Important**: `base` also affects the dev server. The auth dev server serves at `http://localhost:5174/auth/` (not the root).
+
+---
+
+## Dev Proxy (Accessing Both Apps on One Port)
+
+During development, each app runs on its own port (dashboard on 5173, auth on 5174). To mirror production behavior where both live on one origin, the dashboard's `vite.config.ts` includes a proxy:
+
+### `apps/dashboard/vite.config.ts`
+
+```ts
+import { defineConfig, type PluginOption } from "vite"
+import type { IncomingMessage, ServerResponse } from "node:http"
+import react from "@vitejs/plugin-react"
+import tailwindcss from "@tailwindcss/vite"
+
+function authRedirect(): PluginOption {
+  return {
+    name: "auth-redirect",
+    configureServer(server) {
+      server.middlewares.use(
+        (req: IncomingMessage, _res: ServerResponse, next: () => void) => {
+          if (req.url === "/auth") {
+            req.url = "/auth/"
+          }
+          next()
+        },
+      )
+    },
+  }
+}
+
+export default defineConfig({
+  plugins: [react(), tailwindcss(), authRedirect()],
+  server: {
+    proxy: {
+      "/auth": {
+        target: "http://localhost:5174",
+        changeOrigin: true,
+      },
+    },
+  },
+})
+```
+
+**How it works**:
+
+1. **`server.proxy`** — Vite's built-in HTTP proxy (powered by `http-proxy`). Any request starting with `/auth` is forwarded to `http://localhost:5174` (where the auth dev server runs). This includes HTML, JS, CSS, WebSocket (HMR), and all other requests.
+
+2. **`authRedirect` plugin** — A custom Vite plugin that rewrites `/auth` → `/auth/` before the proxy handles it. This is needed because the auth app's `base: "/auth/"` requires the trailing slash. Without the rewrite, visiting `http://localhost:5173/auth` returns 404 — only `/auth/` works.
+
+3. **`configureServer`** — A Vite plugin hook that gives access to the underlying connect middleware server. The middleware runs before the proxy, so the URL rewrite happens first.
+
+4. **`changeOrigin: true`** — Changes the `Host` header in proxied requests to match the target (`localhost:5174`). Some servers check the `Host` header and reject requests that don't match.
+
+**Why `@types/node` is needed**: The `IncomingMessage` and `ServerResponse` types come from Node.js's `http` module. Since `vite.config.ts` runs in Node.js, we added `@types/node` as a dev dependency and `"types": ["node"]` to `tsconfig.node.json`.
+
+**Result**: During dev, you can access everything from one origin:
+- `http://localhost:5173/` → Dashboard (served directly)
+- `http://localhost:5173/auth` → Auth (proxied to port 5174)
+
+---
+
+## Testing Production Build Locally
+
+```bash
+# Build both apps
+pnpm build
+
+# Copy auth output into dashboard's dist (same as Vercel build command)
+cp -r apps/auth/dist apps/dashboard/dist/auth
+
+# Serve the combined output
+npx serve apps/dashboard/dist
+```
+
+Visit `http://localhost:3000` for dashboard and `http://localhost:3000/auth` for auth.
+
+---
+
 ## Common Commands
 
 ```bash
 # Start both apps in dev mode
 pnpm dev
+
+# Start a single app
+pnpm --filter @workspace/dashboard dev
+pnpm --filter @workspace/auth dev
 
 # Build all workspaces for production
 pnpm build
@@ -972,10 +1138,8 @@ pnpm ui:add <component-name>
 
 # Install a dependency in a specific workspace
 pnpm --filter @workspace/ui add <package>
-pnpm --filter @workspace/ts-app add -D <package>
-
-# Run a script in a specific workspace
-pnpm --filter @workspace/ts-app dev
+pnpm --filter @workspace/dashboard add -D <package>
+pnpm --filter @workspace/auth add -D <package>
 
 # Check what workspaces exist
 pnpm ls --depth -1
@@ -986,7 +1150,7 @@ pnpm why <package-name>
 
 ## Ports
 
-| App    | URL                    |
-|--------|------------------------|
-| ts-app | http://localhost:5173  |
-| js-app | http://localhost:5174  |
+| App       | Direct URL                   | Via Proxy (dashboard)        |
+|-----------|------------------------------|------------------------------|
+| Dashboard | http://localhost:5173        | —                            |
+| Auth      | http://localhost:5174/auth/  | http://localhost:5173/auth   |

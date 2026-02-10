@@ -1,0 +1,11 @@
+{
+  "framework": null,
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm build && cp -r apps/auth/dist apps/dashboard/dist/auth",
+  "outputDirectory": "apps/dashboard/dist",
+  "rewrites": [
+    { "source": "/auth", "destination": "/auth/index.html" },
+    { "source": "/auth/((?!assets/).*)", "destination": "/auth/index.html" },
+    { "source": "/((?!assets/|auth/).*)", "destination": "/index.html" }
+  ]
+}
