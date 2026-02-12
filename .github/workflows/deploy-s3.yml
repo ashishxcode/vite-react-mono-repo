@@ -1,0 +1,80 @@
+# ──────────────────────────────────────────────────────────────
+# Deploy vite-react-mono-repo static site to AWS S3
+# Trigger: push to main branch
+# ──────────────────────────────────────────────────────────────
+# Required GitHub Secrets:
+#   AWS_ACCESS_KEY_ID     – IAM access key with s3:PutObject, s3:DeleteObject, s3:ListBucket
+#   AWS_SECRET_ACCESS_KEY – IAM secret key
+#
+# Optional GitHub Secrets (if using CloudFront):
+#   CLOUDFRONT_DISTRIBUTION_ID – CloudFront distribution to invalidate
+# ──────────────────────────────────────────────────────────────
+
+name: Deploy to S3
+
+on:
+  push:
+    branches: [main]
+
+env:
+  S3_BUCKET: vite-monorepo-deployment          # ← REPLACE with your S3 bucket name
+  AWS_REGION: ap-south-1               # ← REPLACE with your AWS region
+
+jobs:
+  build-and-deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Setup pnpm (version auto-detected from packageManager field) ──
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      # ── 3. Setup Node.js 20 LTS with pnpm dependency cache ──
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      # ── 4. Install dependencies (frozen lockfile for reproducibility) ──
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── 5. Build all apps via Turborepo ──────────────────────
+      - name: Build
+        run: pnpm build
+
+      # ── 6. Merge auth dist into dashboard dist ───────────────
+      # Same strategy as vercel.json: dashboard serves at /
+      # and auth is nested under /auth/
+      - name: Merge app outputs
+        run: cp -r apps/auth/dist apps/dashboard/dist/auth
+
+      # ── 7. Configure AWS credentials ─────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ── 8. Deploy to S3 ─────────────────────────────────────
+      # --delete removes files from S3 that no longer exist in build output
+      - name: Sync to S3
+        run: aws s3 sync apps/dashboard/dist/ s3://${{ env.S3_BUCKET }} --delete
+
+      # ── 9. (Optional) Invalidate CloudFront cache ───────────
+      # Uncomment the step below if you have a CloudFront distribution
+      # and add CLOUDFRONT_DISTRIBUTION_ID to your GitHub secrets.
+      #
+      # - name: Invalidate CloudFront cache
+      #   if: ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID != '' }}
+      #   run: |
+      #     aws cloudfront create-invalidation \
+      #       --distribution-id ${{ secrets.CLOUDFRONT_DISTRIBUTION_ID }} \
+      #       --paths "/*"
